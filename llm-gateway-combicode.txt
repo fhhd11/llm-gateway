@@ -1,0 +1,676 @@
+You are an expert software architect. The user is providing you with the complete source code for a project, contained in a single file. Your task is to meticulously analyze the provided codebase to gain a comprehensive understanding of its structure, functionality, dependencies, and overall architecture.
+
+A file tree is provided below to give you a high-level overview. The subsequent sections contain the full content of each file, clearly marked with "// FILE: <path>".
+
+Your instructions are:
+1.  **Analyze Thoroughly:** Read through every file to understand its purpose and how it interacts with other files.
+2.  **Identify Key Components:** Pay close attention to configuration files (like package.json, pyproject.toml), entry points (like index.js, main.py), and core logic.
+
+## Project File Tree
+
+```
+llm-gateway/
+├── .env.example
+├── .github
+│   └── workflows
+│       └── ci-cd.yml
+├── LICENSE
+├── README.md
+├── app
+│   ├── __init__.py
+│   ├── config.py
+│   ├── db
+│   │   └── supabase_client.py
+│   ├── dependencies.py
+│   ├── main.py
+│   ├── middleware
+│   │   ├── auth.py
+│   │   └── rate_limit.py
+│   ├── models
+│   │   └── schemas.py
+│   ├── monitoring
+│   │   └── callbacks.py
+│   ├── routers
+│   │   └── api.py
+│   ├── services
+│   │   ├── billing_service.py
+│   │   └── litellm_service.py
+│   └── utils
+│       ├── exceptions.py
+│       └── logging.py
+├── deployments
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── llm-gateway-technical-specification.md
+├── pyproject.toml
+├── requirements-dev.txt
+├── requirements.txt
+├── supabase_db.sql
+└── tests
+    ├── conftest.py
+    ├── integration
+    │   └── test_api.py
+    └── unit
+        ├── test_billing_service.py
+        └── test_litellm_service.py
+```
+
+---
+
+// FILE: .env.example
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=...
+LITE_LLM_MARKUP=0.25  # 25% наценка
+REDIS_URL=redis://localhost:6379
+LANGFUSE_SECRET_KEY=your_langfuse_key  # Если используешь Langfuse
+JWT_SECRET=your_supabase_jwt_secret  # Из Supabase
+```
+
+// FILE: .github/workflows/ci-cd.yml
+```
+
+```
+
+// FILE: app/__init__.py
+```
+
+```
+
+// FILE: app/config.py
+```
+from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Settings(BaseSettings):
+    supabase_url: str
+    supabase_key: str
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    lite_llm_markup: float = 0.25
+    redis_url: str = "redis://localhost:6379"
+    langfuse_secret_key: str | None = None
+    jwt_secret: str
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+// FILE: app/db/supabase_client.py
+```
+# Handled in dependencies, but if needed:
+from supabase import create_client
+from app.config import settings
+
+def get_client():
+    return create_client(settings.supabase_url, settings.supabase_key)
+```
+
+// FILE: app/dependencies.py
+```
+from fastapi import Depends, HTTPException, Header
+from jose import JWTError, jwt
+from supabase import create_client
+from app.config import settings
+
+def get_supabase_client():
+    return create_client(settings.supabase_url, settings.supabase_key)
+
+async def get_current_user(authorization: str = Header(...)):
+    try:
+        token = authorization.replace("Bearer ", "")
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])  # Adjust algorithm if needed
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+```
+
+// FILE: app/main.py
+```
+from fastapi import FastAPI
+from app.routers import api
+from app.middleware.rate_limit import limiter
+from slowapi.errors import RateLimitExceeded
+from app.utils.logging import logger
+from slowapi.middleware import SlowAPIMiddleware
+
+app = FastAPI()
+
+app.state.limiter = limiter
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request, exc):
+    return {"detail": "Rate limit exceeded"}, 429
+
+app.include_router(api.router)
+
+@app.on_event("startup")
+async def startup():
+    logger.info("App started")
+
+app.add_middleware(SlowAPIMiddleware)
+```
+
+// FILE: app/middleware/auth.py
+```
+# Already handled in dependencies, but if needed as middleware:
+from fastapi import FastAPI
+
+def add_auth_middleware(app: FastAPI):
+    # Can add global middleware if needed
+    pass
+```
+
+// FILE: app/middleware/rate_limit.py
+```
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from fastapi import Request
+from app.config import settings
+import limits.aio.storage  # Для настройки implementation
+
+# Настройка для использования redis-py вместо coredis (для async Redis)
+limits.aio.storage.RedisStorage.implementation = "redispy"
+
+# Limiter с async storage URI (префикс "async+" для async mode)
+limiter = Limiter(
+    key_func=get_remote_address,  # Или custom по user_id
+    storage_uri="async+" + settings.redis_url  # Например, "async+redis://localhost:6379"
+)
+```
+
+// FILE: app/models/schemas.py
+```
+from pydantic import BaseModel
+from typing import List, Dict, Any
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatCompletionRequest(BaseModel):
+    model: str
+    messages: List[ChatMessage]
+    stream: bool = False
+
+class ChatCompletionResponse(BaseModel):
+    choices: List[Dict[str, Any]]
+    usage: Dict[str, int]
+```
+
+// FILE: app/monitoring/callbacks.py
+```
+def track_cost_callback(kwargs, completion_response, start_time, end_time):
+    # Calculate cost from response.usage
+    tokens = completion_response['usage']['total_tokens']
+    cost = tokens * 0.00002  # Example
+    # Send to Langfuse or Prometheus
+    print(f"Cost tracked: {cost}")  # Placeholder, integrate Langfuse
+```
+
+// FILE: app/routers/api.py
+```
+from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import StreamingResponse
+from app.models.schemas import ChatCompletionRequest, ChatCompletionResponse
+from app.services.litellm_service import call_llm
+from app.services.billing_service import estimate_cost, update_balance, get_balance
+from app.dependencies import get_current_user, get_supabase_client
+from app.config import settings
+from supabase import Client  # Добавьте эту строку
+
+router = APIRouter()
+
+@router.post("/v1/chat/completions")
+async def chat_completions(
+    request: ChatCompletionRequest,
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_supabase_client)
+):
+    # Estimate tokens (simplified)
+    input_tokens = sum(len(msg.content) for msg in request.messages) // 4  # Rough est
+
+    est_cost = estimate_cost(request.model, input_tokens)
+    if await get_balance(db, user_id) < est_cost:
+        raise InsufficientFundsError("Insufficient balance")
+
+    try:
+        response = await call_llm(request.model, [msg.dict() for msg in request.messages], request.stream)
+        
+        if not request.stream:
+            # Non-stream: Update billing after
+            actual_cost = response.usage.total_tokens * 0.00002 * (1 + settings.lite_llm_markup)  # Adjust
+            await update_balance(db, user_id, -actual_cost, f"LLM call: {request.model}")
+            return ChatCompletionResponse(choices=response.choices, usage=response.usage)
+        
+        # Streaming
+        def stream_generator():
+            total_tokens = 0
+            for chunk in response:
+                total_tokens += 1  # Track roughly
+                yield chunk
+            # Update after stream ends
+            actual_cost = total_tokens * 0.00002 * (1 + settings.lite_llm_markup)
+            update_balance(db, user_id, -actual_cost, f"LLM call: {request.model}")  # Note: Not async in gen, adjust if needed
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+// FILE: app/services/billing_service.py
+```
+from supabase import Client
+from fastapi import Depends
+from app.dependencies import get_supabase_client
+from app.utils.exceptions import InsufficientFundsError
+
+async def get_balance(db: Client, user_id: str) -> float:
+    result = db.table("balances").select("balance").eq("user_id", user_id).execute()
+    if not result.data:
+        return 0.0
+    return result.data[0]["balance"]
+
+async def update_balance(db: Client, user_id: str, amount: float, description: str):
+    # Atomic update: Use Supabase RPC if setup, else transaction
+    current_balance = await get_balance(db, user_id)
+    new_balance = current_balance + amount
+    if new_balance < 0:
+        raise InsufficientFundsError("Insufficient balance")
+    
+    # Update balance
+    db.table("balances").upsert({"user_id": user_id, "balance": new_balance}).execute()
+    
+    # Insert transaction
+    db.table("transactions").insert({
+        "user_id": user_id,
+        "amount": amount,
+        "type": "debit" if amount < 0 else "credit",
+        "description": description
+    }).execute()
+
+# Estimated cost func (simplified, base on tokens est)
+def estimate_cost(model: str, input_tokens: int) -> float:
+    # Dummy prices, adjust per model
+    price_per_token = 0.00002  # e.g., for GPT-4
+    return input_tokens * price_per_token * (1 + settings.lite_llm_markup)
+```
+
+// FILE: app/services/litellm_service.py
+```
+import litellm
+from litellm import completion
+from app.config import settings
+from app.monitoring.callbacks import track_cost_callback
+
+# Setup LiteLLM
+litellm.success_callback = [track_cost_callback]  # From monitoring
+
+# Example fallback router (configure as needed)
+litellm.Router(
+    model_list=[
+        {"model_name": "gpt-4", "litellm_params": {"model": "openai/gpt-4"}},
+        {"model_name": "claude-3", "litellm_params": {"model": "anthropic/claude-3-sonnet"}},
+    ]
+)
+
+async def call_llm(model: str, messages: list, stream: bool = False):
+    response = completion(model=model, messages=messages, stream=stream, api_key=settings.openai_api_key)  # Adjust for provider
+    return response
+```
+
+// FILE: app/utils/exceptions.py
+```
+from fastapi import HTTPException
+
+class InsufficientFundsError(HTTPException):
+    def __init__(self, detail: str = "Insufficient funds"):
+        super().__init__(status_code=402, detail=detail)
+```
+
+// FILE: app/utils/logging.py
+```
+import structlog
+
+structlog.configure(
+    processors=[
+        structlog.processors.JSONRenderer()
+    ]
+)
+logger = structlog.get_logger()
+```
+
+// FILE: deployments/docker-compose.yml
+```
+
+```
+
+// FILE: deployments/Dockerfile
+```
+
+```
+
+// FILE: LICENSE
+```
+
+```
+
+// FILE: llm-gateway-technical-specification.md
+```
+# Технический Документ: LLM Gateway
+
+## Введение
+
+LLM Gateway — это standalone микросервис, разработанный как унифицированный прокси для взаимодействия с различными провайдерами Large Language Models (LLM), такими как OpenAI, Anthropic, Google Gemini и другими. Он интегрируется с LiteLLM для унификации API вызовов, Supabase для аутентификации и управления базой данных (балансы и транзакции), и FastAPI как основным фреймворком для создания высокопроизводительного API.
+
+Цели:
+- Обеспечить безопасный, масштабируемый и унифицированный доступ к LLM провайдерам.
+- Реализовать биллинг с наценкой (markup) и atomic обновлениями баланса.
+- Поддерживать streaming ответов для real-time взаимодействия.
+- Соответствовать production-ready стандартам: async обработка, error handling, logging, monitoring, compliance с российским законодательством (FZ-152 для локализации данных в РФ via Yandex Cloud-integrated Supabase).
+
+Документ описывает архитектуру, файловую структуру, технологический стек, потоки данных, взаимодействия компонентов, безопасность, масштабируемость и деплой. Все решения ориентированы на production: без моков, с реальными интеграциями, тестированием и мониторингом. Актуализация на 11 июля 2025 года на основе веб-поиска (FastAPI v0.116.0, LiteLLM v1.74.0-stable, Supabase-py v2.5.0).
+
+## Архитектура
+
+### Общая Архитектура
+LLM Gateway — это stateless микросервис (кроме взаимодействий с DB), который действует как gateway между upstream сервисами (e.g., Orchestrator или Frontend) и LLM провайдерами. Он обрабатывает аутентификацию, rate limiting, проверку баланса, вызовы LLM и пост-обработку (billing).
+
+- **Компоненты**:
+  - **API Layer (FastAPI)**: Обработка HTTP запросов, включая streaming endpoints.
+  - **LiteLLM Proxy**: Унификация вызовов к LLM, с поддержкой fallbacks, cost tracking via callbacks и rate limiting.
+  - **Supabase Integration**: Аутентификация (JWT) и DB (PostgreSQL с Row Level Security — RLS для изоляции данных пользователей).
+  - **Middleware**: Auth, rate limiting (SlowAPI с Redis для distributed storage).
+  - **Services**: Бизнес-логика для billing и LLM вызовов.
+  - **Monitoring & Logging**: Интеграция с Prometheus/Grafana для метрик, Langfuse для LLM tracing via LiteLLM callbacks, structlog для structured logging.
+
+- **Внешние Зависимости**:
+  - LLM Providers: OpenAI, Anthropic и т.д. (API keys в Vault или env).
+  - Supabase: Hosted в РФ-compliant регионе (Yandex Cloud integration).
+  - Redis: Для rate limiting и caching (опционально для session state, но в Gateway stateless).
+
+- **Диаграмма Архитектуры (Текстовая)**:
+  ```
+  [Upstream (Orchestrator/Frontend)] --> [HTTPS Request (JWT, JSON payload)]
+                                       |
+                                       v
+  [FastAPI App] --> [Middleware: Auth (Supabase JWT) --> Rate Limit (SlowAPI + Redis)]
+                    |
+                    v
+  [Dependency: Get User ID] --> [Billing Check: Async Query Supabase DB (balances)]
+                                |
+                                v (If balance OK)
+  [LiteLLM Service: Call completion(model, messages, stream=True)] --> [Fallback Router if needed]
+                                                                       |
+                                                                       v
+  [LLM Provider API] <-- [Unified Call]
+                      --> [Response (Streaming Chunks + Usage Tokens)]
+                                |
+                                v
+  [Callback: Calculate Cost (tokens * price + markup)] --> [Atomic DB Update: Deduct balance, Insert transaction (Supabase)]
+                                                           |
+                                                           v
+  [Stream Response to Upstream] + [Log to Langfuse/Prometheus]
+  ```
+
+Эта архитектура обеспечивает низкую latency (<100ms overhead), reliability (fallbacks) и security (RLS, JWT).
+
+### Масштабируемость и Надежность
+- **Horizontal Scaling**: Stateless дизайн позволяет запускать multiple instances в Kubernetes (Yandex Managed Kubernetes).
+- **Fault Tolerance**: LiteLLM fallbacks (auto-switch providers); DB retries via exponential backoff.
+- **Performance**: Async I/O everywhere (FastAPI async routes, asyncpg для DB если нужно расширить supabase-py).
+- **Monitoring**: Prometheus для метрик (e.g., request latency, error rates); Grafana dashboards; LiteLLM callbacks для tracing.
+
+## Файловая Структура
+
+Проект организован как mono-repo для простоты, с четким разделением concerns. Структура следует best practices для FastAPI (из GitHub zhanymkanov/fastapi-best-practices: modular, testable, with config separation).
+
+```
+llm-gateway/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                  # Entry point: FastAPI app creation, middleware setup, router includes
+│   ├── config.py                # Settings via Pydantic (env vars: SUPABASE_URL, LITE_LLM_KEYS, etc.)
+│   ├── dependencies.py          # FastAPI dependencies (e.g., get_current_user, get_db_client)
+│   ├── routers/
+│   │   └── api.py               # Endpoints: /v1/chat/completions, /v1/models (list available models)
+│   ├── services/
+│   │   ├── litellm_service.py   # Wrappers for LiteLLM (completion calls, callbacks for cost tracking)
+│   │   └── billing_service.py   # Logic for balance checks, updates (async DB interactions)
+│   ├── db/
+│   │   └── supabase_client.py   # Supabase client initialization and async queries/updates
+│   ├── middleware/
+│   │   ├── auth.py              # JWT authentication middleware (Supabase-specific)
+│   │   └── rate_limit.py        # SlowAPI configuration with Redis backend
+│   ├── models/
+│   │   └── schemas.py           # Pydantic models (e.g., ChatCompletionRequest, ChatCompletionResponse)
+│   ├── utils/
+│   │   ├── logging.py           # Structured logging setup (structlog)
+│   │   └── exceptions.py        # Custom exceptions (e.g., InsufficientFundsError)
+│   └── monitoring/
+│       └── callbacks.py         # LiteLLM callbacks for monitoring (cost, traces to Langfuse)
+├── tests/
+│   ├── unit/
+│   │   ├── test_litellm_service.py  # Unit tests for LLM calls (with mocks for providers)
+│   │   └── test_billing_service.py  # Unit tests for billing logic
+│   ├── integration/
+│   │   └── test_api.py              # Integration tests for endpoints (using TestClient, real Supabase if possible)
+│   └── conftest.py                  # Pytest fixtures (e.g., app client)
+├── deployments/
+│   ├── Dockerfile                   # Multi-stage build for production
+│   ├── docker-compose.yml           # Local dev setup (with Redis, Supabase mock if needed, but prod uses real)
+│   └── k8s/                         # Kubernetes manifests (deployments, services, secrets)
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml                # GitHub Actions: lint, test, build, deploy to Yandex Cloud
+├── requirements.txt                 # Production dependencies
+├── requirements-dev.txt             # Dev dependencies (pytest, black, etc.)
+├── .env.example                     # Sample environment variables
+├── pyproject.toml                   # Black, isort, pylint config
+├── README.md                        # Project overview, setup instructions
+└── LICENSE                          # MIT or proprietary
+```
+
+Эта структура обеспечивает maintainability: тесты изолированы, config централизован.
+
+## Технологический Стек
+
+- **Backend Framework**: FastAPI v0.116.0 (high-performance, async, auto-docs via Swagger).
+- **LLM Proxy**: LiteLLM v1.74.0-stable (supports 100+ providers, built-in proxy, callbacks, fallbacks).
+- **Database & Auth**: Supabase (PostgreSQL with RLS, JWT auth); supabase-py v2.5.0 for client.
+- **Rate Limiting**: SlowAPI v0.1.9 with Redis backend (aioredis для async).
+- **Logging**: structlog v24.1.0 (structured JSON logs).
+- **Monitoring**: Langfuse v2.x (via LiteLLM callbacks); Prometheus v2.53.0 + Grafana.
+- **Other**: Pydantic v2.7.4 (validation), httpx v0.27.0 (async HTTP), python-dotenv v1.0.1 (env loading).
+- **Infrastructure**: Docker, Kubernetes, Vault для secrets.
+- **Testing**: pytest v8.2.2 (80%+ coverage), Locust для load testing.
+- **CI/CD**: GitHub Actions (black/isort lint, pytest, Docker build/push).
+
+Все версии актуальны на 11 июля 2025 (из web_search).
+
+## Потоки Данных и Взаимодействия
+
+### Основной Поток Запроса (/v1/chat/completions)
+1. **Incoming Request**: JSON payload (model, messages) с JWT в Authorization header от upstream (e.g., Orchestrator).
+2. **Middleware Processing**:
+   - Auth: dependencies.get_current_user() verifies JWT, extracts user_id.
+   - Rate Limit: middleware.rate_limit() checks limits (e.g., 10 req/min per user_id) via Redis.
+3. **Billing Check**: services.billing_service.check_balance(user_id, estimated_cost) — async query к Supabase balances table.
+4. **LLM Call**: services.litellm_service.call_llm(model, messages, stream=True) — использует LiteLLM completion с fallback.
+5. **Response Handling**: StreamingResponse yields chunks; на success callback (LiteLLM) рассчитывается cost.
+6. **Billing Update**: services.billing_service.update_balance(user_id, -cost, "LLM call") — atomic INSERT/UPDATE в Supabase (используя transactions via Supabase RPC для atomicity).
+7. **Logging/Monitoring**: utils.logging.log_request(); monitoring.callbacks.track_usage() sends to Langfuse.
+8. **Error Flow**: Если balance low — raise exceptions.InsufficientFundsError (HTTP 402); provider error — fallback or 500 with retry.
+
+### Взаимодействия Сервисов
+- **Internal**: Routers вызывают services; services используют db/supabase_client и LiteLLM.
+- **External**: 
+  - Supabase: Async HTTP calls via supabase-py (для auth verification и DB ops).
+  - LLM Providers: HTTP via LiteLLM (secrets из config).
+  - Redis: Для rate limiting (aioredis client in middleware).
+  - Monitoring: Async pushes to Langfuse/Prometheus.
+
+### DB Схема (Supabase PostgreSQL)
+- **Tables**:
+  - balances: user_id (UUID PK), balance (DECIMAL).
+  - transactions: id (UUID PK), user_id (FK), amount (DECIMAL), type (TEXT), timestamp (TIMESTAMP), description (TEXT).
+- **RLS Policies**: SELECT/UPDATE only for auth.uid() = user_id.
+- **Compliance**: Данные локализованы в РФ; нет хранения sensitive chat data.
+
+## Компоненты: Детальное Описание
+
+### Routers (routers/api.py)
+- Endpoints: POST /v1/chat/completions (Pydantic validation via schemas.ChatCompletionRequest).
+- Async routes для streaming.
+
+### Services
+- **litellm_service.py**: Wrappers для litellm.completion; setup Router для fallbacks; callbacks для cost calc (e.g., cost = tokens * model_price + markup).
+- **billing_service.py**: Async funcs для get_balance, update_balance (with transaction logic).
+
+### Middleware
+- **auth.py**: JWT decode с jose; integrate Supabase JWKS if needed.
+- **rate_limit.py**: Limiter(key_func=get_user_id_from_jwt, storage_uri="redis://...").
+
+### Utils и Monitoring
+- Custom logging: JSON format для cloud logs.
+- Callbacks: LiteLLM success/failure hooks для tracing.
+
+## Безопасность
+- **Auth**: JWT only; no sessions.
+- **Data Security**: RLS; encrypt secrets in Vault.
+- **Rate Limiting**: Prevent DDoS/abuse.
+- **Compliance**: Audit logs in transactions table; FZ-152 via Yandex hosting.
+- **Vulnerabilities**: OWASP top 10 mitigated (e.g., input validation via Pydantic).
+
+## Деплой и CI/CD
+- **Dockerfile**: Multi-stage (build deps separate).
+- **Kubernetes**: Deployment с replicas=3, HPA для auto-scaling.
+- **CI/CD**: GitHub Actions — on push: lint (black), test (pytest --cov), build Docker, deploy to Yandex if main branch.
+- **Env Management**: Secrets via K8s Secrets; .env for local.
+
+## Тестирование
+- **Unit**: Mock LiteLLM/Supabase; coverage >90% for services.
+- **Integration**: FastAPI TestClient; real Supabase test instance.
+- **Load**: Locust scripts для 1000 concurrent users.
+- **E2E**: Postman collections для full flows.
+
+```
+
+// FILE: pyproject.toml
+```
+
+```
+
+// FILE: README.md
+```
+
+```
+
+// FILE: requirements-dev.txt
+```
+pytest==8.2.2
+pytest-cov==5.0.0
+black==24.4.2
+isort==5.13.2
+pylint==3.2.5
+locust==2.29.1  # Load testing
+httpx==0.27.0  # Для тестов
+```
+
+// FILE: requirements.txt
+```
+fastapi==0.116.0
+uvicorn==0.30.1  # Для запуска
+litellm==1.74.0
+supabase==2.5.0  # supabase-py
+slowapi==0.1.9
+redis==5.0.7  # Для rate limiting
+pydantic==2.7.4
+httpx==0.27.0
+python-dotenv==1.0.1
+structlog==24.1.0
+langfuse>=2.0  # Для tracing
+prometheus-client==0.22.0  # Для метрик
+python-jose[cryptography]==3.3.0  # Для JWT
+pydantic-settings>=0.2.12
+setuptools
+limits>=3.0.0
+```
+
+// FILE: supabase_db.sql
+```
+-- SQL Script for Supabase PostgreSQL Schema
+
+  -- Table: balances
+  CREATE TABLE balances (
+      user_id UUID PRIMARY KEY,
+      balance DECIMAL NOT NULL DEFAULT 0
+  );
+
+  -- Table: transactions
+  CREATE TABLE transactions (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID REFERENCES balances(user_id) ON DELETE CASCADE,
+      amount DECIMAL NOT NULL,
+      type TEXT NOT NULL,
+      timestamp TIMESTAMP DEFAULT NOW(),
+      description TEXT
+  );
+
+  -- Enable RLS on balances
+  ALTER TABLE balances ENABLE ROW LEVEL SECURITY;
+
+  -- Policy for balances: Users can select their own
+  CREATE POLICY "Enable read access for own balances" ON balances
+      FOR SELECT USING (auth.uid() = user_id);
+
+  -- Policy for balances: Users can update their own
+  CREATE POLICY "Enable update access for own balances" ON balances
+      FOR UPDATE USING (auth.uid() = user_id);
+
+  -- Enable RLS on transactions
+  ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+
+  -- Policy for transactions: Users can select their own
+  CREATE POLICY "Enable read access for own transactions" ON transactions
+      FOR SELECT USING (auth.uid() = user_id);  -- Упрощено, предполагая direct user_id match
+
+  -- Policy for transactions: Users can insert their own (assuming inserts are handled by app)
+  CREATE POLICY "Enable insert access for own transactions" ON transactions
+      FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+  -- Admin access: Use Supabase service_role or custom role for full access (e.g., POLICY for role = 'admin')
+```
+
+// FILE: tests/conftest.py
+```
+
+```
+
+// FILE: tests/integration/test_api.py
+```
+
+```
+
+// FILE: tests/unit/test_billing_service.py
+```
+import pytest
+from app.services.billing_service import estimate_cost
+
+def test_estimate_cost():
+    assert estimate_cost("gpt-4", 100) > 0
+```
+
+// FILE: tests/unit/test_litellm_service.py
+```
+
+```
+
