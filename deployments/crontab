@@ -1,0 +1,17 @@
+# LLM Gateway Cron Jobs
+# Edit with: crontab -e
+
+# Daily backup at 2 AM
+0 2 * * * /path/to/llm-gateway/deployments/backup.sh >> /var/log/llm-gateway-backup.log 2>&1
+
+# Health check every 5 minutes
+*/5 * * * * curl -f http://localhost:8000/health > /dev/null 2>&1 || echo "Health check failed at $(date)" >> /var/log/llm-gateway-health.log
+
+# Log rotation (if using logrotate)
+0 1 * * * /usr/sbin/logrotate /etc/logrotate.d/llm-gateway
+
+# Clean old logs (older than 30 days)
+0 3 * * 0 find /var/log/llm-gateway/ -name "*.log" -mtime +30 -delete
+
+# Restart service if health check fails 3 times in a row
+*/5 * * * * /path/to/llm-gateway/deployments/health-monitor.sh 

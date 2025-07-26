@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  llm-gateway:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379/0
+      - RATE_LIMIT_STORAGE=redis
+    env_file:
+      - ../env.example
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - llm-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    networks:
+      - llm-network
+
+  # Optional: Supabase local development (uncomment if needed)
+  # supabase:
+  #   image: supabase/postgres:15.1.0.117
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_PASSWORD: your_password_here
+  #     POSTGRES_DB: postgres
+  #   volumes:
+  #     - supabase_data:/var/lib/postgresql/data
+  #   networks:
+  #     - llm-network
+
+volumes:
+  redis_data:
+  # supabase_data:
+
+networks:
+  llm-network:
+    driver: bridge

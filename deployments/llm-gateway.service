@@ -1,0 +1,58 @@
+[Unit]
+Description=LLM Gateway Service
+Documentation=https://github.com/your-org/llm-gateway
+After=network.target docker.service
+Requires=docker.service
+Wants=redis.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/llm-gateway
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=DOCKER_COMPOSE_FILE=/opt/llm-gateway/deployments/docker-compose.prod.yml
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/llm-gateway /var/log/llm-gateway /var/backups/llm-gateway
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Start command
+ExecStart=/usr/local/bin/docker-compose -f ${DOCKER_COMPOSE_FILE} up -d
+ExecStartPost=/bin/bash -c 'for i in {1..30}; do if curl -f http://localhost:8000/health >/dev/null 2>&1; then exit 0; fi; sleep 2; done; exit 1'
+
+# Stop command
+ExecStop=/usr/local/bin/docker-compose -f ${DOCKER_COMPOSE_FILE} down
+ExecStopPost=/bin/bash -c 'docker system prune -f'
+
+# Reload command
+ExecReload=/usr/local/bin/docker-compose -f ${DOCKER_COMPOSE_FILE} restart llm-gateway
+
+# Health check
+ExecStartPost=/bin/bash -c 'echo "LLM Gateway started successfully"'
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Timeout settings
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+
+# Additional dependencies
+RequiresMountsFor=/var/lib/docker 
