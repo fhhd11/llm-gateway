@@ -1,339 +1,555 @@
 # LLM Gateway
 
-LLM Gateway — это унифицированный прокси для взаимодействия с различными провайдерами Large Language Models (LLM) с поддержкой биллинга, мониторинга и rate limiting.
+<div align="center">
 
-## 🚀 Production-Ready Features
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
+![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-### ✅ **Критичные улучшения для продакшена:**
+**Унифицированный API-шлюз для работы с Large Language Models**
 
-- **Multi-worker mode** с Gunicorn (4 workers) для высокой производительности
-- **Error tracking** с Sentry для мониторинга ошибок
-- **Intelligent caching** для /v1/models с Redis + memory fallback
-- **Load balancing** с Nginx и multiple replicas
-- **Graceful shutdown** с правильной очисткой ресурсов
-- **Enhanced security headers** и WAF protection
-- **Health checks** и monitoring endpoints
+Единый интерфейс для OpenAI, Anthropic, Google и других LLM провайдеров с биллингом, мониторингом и отказоустойчивостью.
 
-### 📊 **Производительность:**
-- **4x улучшение** производительности благодаря Gunicorn workers
-- **Кэширование** снижает время ответа на 80% для статических данных
-- **Load balancing** распределяет нагрузку между несколькими инстансами
-- **Connection pooling** для оптимизации работы с базой данных
+[🚀 Быстрый старт](docs/QUICKSTART.md) • [📖 Документация](docs/README.md) • [🔌 API Reference](docs/API_REFERENCE.md)
 
-### 🔒 **Безопасность:**
-- **Enhanced security headers** (CSP, HSTS, X-Frame-Options)
-- **Rate limiting** per-user и global
-- **JWT authentication** с secure token handling
-- **Input validation** и sanitization
+</div>
+
+---
+
+## 🎯 Что это такое?
+
+LLM Gateway — это унифицированный API-шлюз, который позволяет работать с различными провайдерами Large Language Models через единый интерфейс. Вместо интеграции с каждым провайдером отдельно, вы получаете один API для всех с встроенной системой биллинга, мониторинга и отказоустойчивости.
+
+### ✨ Основные возможности
+
+- 🔄 **Унифицированный API** - Один интерфейс для всех LLM провайдеров
+- 💳 **Биллинг и учет** - Система учета использования и списания средств
+- 🚦 **Rate Limiting** - Ограничение частоты запросов на пользователя и глобально
+- 📊 **Мониторинг** - Интеграция с Prometheus, Sentry и Langfuse
+- 🛡️ **Отказоустойчивость** - Circuit breaker и retry механизмы (временно отключены для стабильности)
+- ⚡ **Кэширование** - Redis и in-memory кэширование
+- 🔐 **Безопасность** - JWT аутентификация и валидация входных данных
+- 🏥 **Health Checks** - Комплексная система проверки состояния
+
+### 🤖 Поддерживаемые модели
+
+| Провайдер | Модели |
+|-----------|--------|
+| **OpenAI** | gpt-4, gpt-3.5-turbo |
+| **Anthropic** | claude-3 |
+| **Google** | gemini-1.5-pro |
 
 ## 🚀 Быстрый старт
 
-### Локальная разработка
+### За 5 минут
 
-1. **Клонируйте репозиторий:**
 ```bash
+# 1. Клонируйте репозиторий
 git clone <your-repo-url>
 cd llm-gateway
-```
 
-2. **Настройте окружение:**
-```bash
+# 2. Настройте переменные окружения
 cp env.example .env
-# Отредактируйте .env файл с вашими настройками
-```
+# Отредактируйте .env файл с вашими API ключами
 
-3. **Проверьте конфигурацию:**
-```bash
-python check_env.py
-```
-
-4. **Проверьте подключение к базе данных:**
-```bash
-python test_db_connection.py
-```
-
-5. **Запустите с Docker Compose:**
-```bash
+# 3. Запустите с Docker
 docker-compose -f deployments/docker-compose.yml up -d
-```
 
-6. **Проверьте работу:**
-```bash
+# 4. Проверьте работу
 curl http://localhost:8000/health
 ```
 
-### Продакшн деплой
+### Первый запрос
 
-1. **Подготовьте сервер:**
 ```bash
-# Установите Docker и Docker Compose
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
+curl -X POST \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "user", "content": "Привет!"}
+    ],
+    "stream": false
+  }' \
+  http://localhost:8000/v1/chat/completions
 ```
 
-2. **Настройте окружение:**
-```bash
-cp env.example .env
-# Настройте все переменные окружения в .env
+📖 **[Подробный быстрый старт](docs/QUICKSTART.md)**
+
+## 🏗️ Архитектура
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Client Apps   │    │   Web Browser   │    │   Mobile Apps   │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │      Nginx (Load Balancer)│
+                    └─────────────┬─────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │    LLM Gateway (FastAPI)  │
+                    │  ┌───────────────────────┐│
+                    │  │   Rate Limiting      ││
+                    │  │   Authentication     ││
+                    │  │   Billing Service    ││
+                    │  │   LiteLLM Service    ││
+                    │  │   Monitoring         ││
+                    │  │   Health Checks      ││
+                    │  └───────────────────────┘│
+                    └─────────────┬─────────────┘
+                                 │
+          ┌──────────────────────┼──────────────────────┐
+          │                      │                      │
+┌─────────▼─────────┐  ┌─────────▼─────────┐  ┌─────────▼─────────┐
+│   Redis Cache     │  │  Supabase (DB)    │  │   LLM Providers   │
+│   - Rate Limiting │  │  - User Balances  │  │  - OpenAI         │
+│   - Models Cache  │  │  - Transactions   │  │  - Anthropic      │
+│   - Session Data  │  │  - User Stats     │  │  - Google         │
+└───────────────────┘  └───────────────────┘  └───────────────────┘
 ```
 
-3. **Запустите:**
-```bash
-chmod +x deployments/start.sh
-./deployments/start.sh
-```
+## 🔧 Технологический стек
 
-4. **Протестируйте изменения:**
-```bash
-python test_production_changes.py
-```
+- **Backend**: FastAPI (Python 3.8+)
+- **LLM Integration**: LiteLLM
+- **Database**: PostgreSQL (Supabase)
+- **Cache**: Redis
+- **Authentication**: JWT
+- **Monitoring**: Prometheus, Sentry, Langfuse
+- **Containerization**: Docker & Docker Compose
+- **Load Balancing**: Nginx
+- **Process Management**: Gunicorn (production)
+- **Error Handling**: Circuit Breaker, Retry mechanisms
+- **Logging**: Structured logging with structlog
 
-## 🔧 Устранение неполадок
+## 📚 Документация
 
-### Проблемы с подключением к базе данных
+📖 **[Полная документация](docs/DOCUMENTATION.md)** - Все руководства и справочники  
+📋 **[Оглавление](docs/INDEX.md)** - Поиск по разделам документации  
+🧭 **[Навигация](docs/NAVIGATION.md)** - Путеводитель по документации
 
-Если вы видите ошибку `[WinError 10054] Удаленный хост принудительно разорвал существующее подключение`:
+### 🚀 Быстрый старт
+- ⚡ [QUICKSTART.md](docs/QUICKSTART.md) - Быстрый старт за 5 минут
+- 📖 [DOCUMENTATION.md](docs/DOCUMENTATION.md) - Полная документация проекта
+- 🔌 [API_REFERENCE.md](docs/API_REFERENCE.md) - Подробный API Reference
 
-1. **Проверьте настройки Supabase:**
-   - Убедитесь, что `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` правильно настроены
-   - Используйте Service Role Key, а не Anon Key для подключения к PostgreSQL
+### 🚀 Развертывание и разработка
+- 🚀 [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) - Полное руководство по развертыванию
+- 🛠️ [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) - Руководство по разработке
 
-2. **Запустите тест подключения:**
-```bash
-python test_db_connection.py
-```
+### 📋 Конфигурация
+- ⚙️ [env.example](env.example) - Пример переменных окружения
 
-3. **Проверьте сетевые настройки:**
-   - Убедитесь, что порт 5432 не заблокирован
-   - Проверьте, что VPN не блокирует подключения к Supabase
-   - Убедитесь, что DNS правильно разрешает доменное имя
+## 🔌 API Endpoints
 
-4. **Подробные инструкции:**
-   См. файл [SUPABASE_SETUP.md](SUPABASE_SETUP.md) для детальных инструкций по настройке.
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/v1/chat/completions` | POST | Генерация текста |
+| `/v1/chat/completions/stream` | POST | Потоковая генерация |
+| `/v1/models` | GET | Список доступных моделей (с кэшированием) |
+| `/billing/balance` | GET | Баланс пользователя |
+| `/billing/transactions` | GET | История транзакций |
+| `/health` | GET | Основная проверка состояния |
+| `/health/detailed` | GET | Детальная проверка состояния |
+| `/health/circuit-breakers` | GET | Статус circuit breakers |
+| `/health/monitoring` | GET | Статус мониторинга |
+| `/health/system` | GET | Системные ресурсы |
+| `/health/history` | GET | История health checks (последние 10) |
+| `/ready` | GET | Readiness probe для Kubernetes |
+| `/metrics` | GET | Prometheus метрики |
 
-### Логи и мониторинг
-
-- **Логи приложения:** Проверьте логи на наличие ошибок подключения
-- **Health check:** `GET /health` - общий статус сервиса
-- **Database health:** `GET /health/detailed` - детальная информация о состоянии БД
-- **Metrics:** `GET /metrics` - Prometheus метрики
-- **Error tracking:** Настройте Sentry DSN для отслеживания ошибок
-
-## 📋 Поддерживаемые модели
-
-- **OpenAI**: GPT-4, GPT-3.5-turbo
-- **Anthropic**: Claude-3, Claude-2
-- **Google**: Gemini-1.5-pro, Gemini-pro
-
-## 🔧 API Endpoints
-
-### GET /v1/models
-Возвращает список поддерживаемых моделей в формате, совместимом с OpenAI API. **Кэшируется** для улучшения производительности.
-
-### POST /v1/chat/completions
-Основной endpoint для генерации текста с использованием LLM моделей.
-
-### GET /health
-Проверка состояния сервиса.
-
-### GET /metrics
-Prometheus метрики.
+📖 **[Подробный API Reference](docs/API_REFERENCE.md)**
 
 ## ⚙️ Конфигурация
 
-### Обязательные переменные окружения:
+### Обязательные переменные окружения
 
 ```bash
-# Supabase (база данных)
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+# База данных (Supabase)
+SUPABASE_URL=your_supabase_url_here
+SUPABASE_KEY=your_supabase_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
 
-# JWT для аутентификации
-JWT_SECRET_KEY=your_jwt_secret
+# Аутентификация
+JWT_SECRET_KEY=your_jwt_secret_key_here
 
-# API ключи провайдеров
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-GOOGLE_GEMINI_API_KEY=your_gemini_key
-
-# Error tracking (опционально)
-SENTRY_DSN=your_sentry_dsn
+# API ключи провайдеров (хотя бы один)
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+GOOGLE_GEMINI_API_KEY=your_google_gemini_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here  # Дополнительный Google API ключ
 ```
 
-### Опциональные настройки:
+### Опциональные настройки
 
 ```bash
-# Redis для rate limiting и кэширования
+# Redis
 REDIS_URL=redis://localhost:6379/0
 
-# Rate limiting
+# Rate Limiting
+RATE_LIMIT_STORAGE=redis  # redis or memory
 RATE_LIMIT_REQUESTS_PER_MINUTE=60
 RATE_LIMIT_REQUESTS_PER_HOUR=1000
 
-# Environment
-ENVIRONMENT=production
-APP_VERSION=1.0.0
+# Retry & Circuit Breaker
+RETRY_ENABLED=true
+RETRY_MAX_ATTEMPTS=3
+CIRCUIT_BREAKER_ENABLED=true
+CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+
+# Мониторинг
+SENTRY_DSN=your_sentry_dsn_here
+LANGFUSE_ENABLED=false
+LANGFUSE_PUBLIC_KEY=your_langfuse_public_key_here
+LANGFUSE_SECRET_KEY=your_langfuse_secret_key_here
+
+# Биллинг
+BILLING_ENABLED=true
+BILLING_CURRENCY=USD
+BILLING_DEFAULT_BALANCE=100.0
+LITE_LLM_MARKUP=0.25  # Процент наценки для LiteLLM
 ```
 
-## 🐳 Docker
+📖 **[Подробная конфигурация](docs/DEPLOYMENT_GUIDE.md#конфигурация)**
 
-### Локальная разработка:
+## 🐳 Развертывание
+
+### Локальная разработка
+
 ```bash
+# Запуск с Docker Compose
 docker-compose -f deployments/docker-compose.yml up -d
+
+# Или с помощью Makefile
+make docker-run
+
+# Проверка работы
+curl http://localhost:8000/health
 ```
 
-### Продакшн (с multi-worker mode):
+### Продакшн
+
 ```bash
+# Запуск продакшн сервисов
 docker-compose -f deployments/docker-compose.prod.yml up -d
+
+# Или с помощью скрипта
+chmod +x deployments/start.sh
+./deployments/start.sh
+
+# Или с помощью Makefile
+make docker-run-prod
 ```
+
+### Kubernetes
+
+```bash
+# Применение манифестов
+kubectl apply -f deployments/k8s/
+```
+
+### Управление сервисами
+
+```bash
+# Запуск
+make start
+
+# Остановка
+make stop
+
+# Просмотр логов
+make docker-logs
+
+# Проверка состояния
+make health
+```
+
+📖 **[Подробное руководство по развертыванию](docs/DEPLOYMENT_GUIDE.md)**
 
 ## 📊 Мониторинг
 
-- **Health Check**: `GET /health`
-- **Metrics**: `GET /metrics` (Prometheus)
-- **Circuit Breaker Status**: `GET /health/circuit-breakers`
-- **Error Tracking**: Sentry integration (если настроен)
+### Health Checks
+
+- **Основной**: `GET /health` - общий статус сервиса
+- **Детальный**: `GET /health/detailed` - статус всех компонентов
+- **Системный**: `GET /health/system` - ресурсы системы
+- **Circuit Breaker**: `GET /health/circuit-breakers` - статус circuit breakers
+- **Мониторинг**: `GET /health/monitoring` - статус мониторинга
+- **История**: `GET /health/history` - история health checks (последние 10)
+- **Readiness**: `GET /ready` - готовность к обработке запросов
+
+### Метрики
+
+- **Prometheus**: `GET /metrics` - метрики производительности
+- **Grafana**: Дашборды для визуализации
+- **Sentry**: Error tracking и performance monitoring
+- **Langfuse**: LLM observability
+
+### Логирование
+
+- **Структурированные логи** с structlog
+- **Уровни логирования** (DEBUG, INFO, WARNING, ERROR)
+- **Контекстная информация** в каждом логе
+- **Ротация логов** с logrotate
 
 ## 🔒 Безопасность
 
-- JWT аутентификация
-- Rate limiting (per-user и global)
-- CORS настройки
-- Circuit breaker для отказоустойчивости
-- Enhanced security headers
-- Input validation и sanitization
-
-## 📝 Логирование
-
-Логи доступны через:
-```bash
-docker-compose -f deployments/docker-compose.prod.yml logs -f llm-gateway
-```
+- **JWT аутентификация** - Secure token handling
+- **Rate limiting** - Per-user и global ограничения
+- **CORS настройки** - Контроль доступа
+- **Input validation** - Валидация и sanitization входных данных
+- **Security headers** - CSP, HSTS, X-Frame-Options
+- **Circuit breaker** - Защита от каскадных сбоев (временно отключен)
+- **Graceful degradation** - Fallback responses при ошибках
 
 ## 🧪 Тестирование
 
 ```bash
-# Установите dev зависимости
+# Установка dev зависимостей
 pip install -r requirements-dev.txt
+# или
+make install-dev
 
-# Запустите тесты
-pytest
+# Запуск тестов
+pytest tests/ -v
+# или
+make test
 
 # С покрытием
-pytest --cov=app --cov-report=html
+pytest tests/ --cov=app --cov-report=html
+# или
+make test-cov
 
-# Тест production изменений
-python test_production_changes.py
+# Линтинг
+make lint
+
+# Форматирование кода
+make format
+
+# Все проверки
+make check
 ```
 
 ## 📁 Структура проекта
 
 ```
 llm-gateway/
-├── app/                    # Основной код приложения
-│   ├── config/            # Конфигурация
-│   ├── routers/           # API роуты (с кэшированием)
-│   ├── services/          # Бизнес-логика
-│   ├── middleware/        # Middleware
-│   └── utils/             # Утилиты
-├── deployments/           # Docker и деплой
-│   ├── docker-compose.yml # Локальная разработка
-│   ├── docker-compose.prod.yml # Продакшн (multi-worker)
-│   ├── Dockerfile         # Образ приложения (Gunicorn)
-│   ├── nginx.conf         # Конфигурация Nginx (load balancing)
-│   ├── start.sh           # Скрипт запуска
-│   ├── stop.sh            # Скрипт остановки
-│   ├── backup.sh          # Скрипт бэкапа
-│   ├── health-monitor.sh  # Мониторинг здоровья
-│   ├── firewall-setup.sh  # Настройка файрвола
-│   ├── ssl-setup.sh       # Настройка SSL
-│   ├── logrotate.conf     # Ротация логов
-│   ├── llm-gateway.service # Systemd сервис
-│   ├── k8s/               # Kubernetes манифесты
-│   └── monitoring/        # Конфигурация мониторинга
-├── tests/                 # Тесты
-├── requirements.txt       # Зависимости (включая Gunicorn, Sentry)
-├── test_production_changes.py # Тест production изменений
-└── README.md             # Документация
+├── app/                          # Основной код приложения
+│   ├── config/                   # Конфигурация
+│   │   ├── environment.py        # Управление окружением
+│   │   ├── secrets.py            # Управление секретами
+│   │   ├── settings.py           # Настройки приложения
+│   │   └── utils.py              # Утилиты конфигурации
+│   ├── db/                       # Работа с базой данных
+│   │   ├── async_postgres_client.py  # PostgreSQL клиент
+│   │   └── supabase_client.py    # Supabase клиент
+│   ├── health/                   # Health checks
+│   │   └── health_checks.py      # Система проверки состояния
+│   ├── middleware/               # Middleware
+│   │   ├── auth.py               # Аутентификация
+│   │   └── rate_limit.py         # Rate limiting
+│   ├── models/                   # Pydantic модели
+│   │   └── schemas.py            # API схемы
+│   ├── monitoring/               # Мониторинг
+│   │   ├── callbacks.py          # LiteLLM callbacks
+│   │   ├── langfuse_client.py    # Langfuse интеграция
+│   │   └── prometheus_metrics.py # Prometheus метрики
+│   ├── routers/                  # API роуты
+│   │   └── api.py                # Основные endpoints
+│   ├── services/                 # Бизнес-логика
+│   │   ├── billing_service.py    # Биллинг
+│   │   └── litellm_service.py    # LLM интеграция
+│   ├── utils/                    # Утилиты
+│   │   ├── exceptions.py         # Кастомные исключения
+│   │   ├── logging.py            # Логирование
+│   │   ├── redis_client.py       # Redis клиент
+│   │   └── retry.py              # Retry механизмы
+│   ├── config.py                 # Конфигурация приложения
+│   ├── dependencies.py           # FastAPI зависимости
+│   ├── main.py                   # Точка входа FastAPI
+│   └── __init__.py
+├── docs/                         # 📚 Документация
+│   ├── README.md                 # Главная страница документации
+│   ├── INDEX.md                  # Оглавление
+│   ├── QUICKSTART.md             # Быстрый старт
+│   ├── DOCUMENTATION.md          # Полная документация
+│   ├── API_REFERENCE.md          # API Reference
+│   ├── DEPLOYMENT_GUIDE.md       # Руководство по развертыванию
+│   ├── DEVELOPMENT_GUIDE.md      # Руководство по разработке
+│   ├── STRUCTURE.md              # Структура документации
+│   └── .gitkeep
+├── deployments/                  # Конфигурация развертывания
+│   ├── docker-compose.yml        # Docker Compose (dev)
+│   ├── docker-compose.prod.yml   # Docker Compose (prod)
+│   ├── docker-compose.monitoring.yml # Мониторинг
+│   ├── Dockerfile                # Docker образ
+│   ├── nginx.conf                # Nginx конфигурация
+│   ├── start.sh                  # Скрипт запуска
+│   ├── stop.sh                   # Скрипт остановки
+│   ├── backup.sh                 # Скрипт бэкапа
+│   ├── health-monitor.sh         # Мониторинг здоровья
+│   ├── firewall-setup.sh         # Настройка файрвола
+│   ├── ssl-setup.sh              # Настройка SSL
+│   ├── logrotate.conf            # Ротация логов
+│   ├── llm-gateway.service       # Systemd сервис
+│   ├── crontab                   # Cron задачи
+│   ├── test_gemini.sh            # Тест Gemini
+│   ├── test_request.json         # Тестовый запрос
+│   ├── k8s/                      # Kubernetes манифесты
+│   │   ├── deployment.yaml       # Deployment
+│   │   └── secrets.yaml          # Секреты
+│   └── monitoring/               # Конфигурация мониторинга
+│       ├── alertmanager.yml      # Alertmanager
+│       ├── grafana-dashboard.json # Grafana дашборд
+│       └── prometheus-rules.yml  # Prometheus правила
+├── tests/                        # Тесты
+│   ├── conftest.py               # Конфигурация pytest
+│   ├── utils.py                  # Утилиты для тестов
+│   └── README.md                 # Документация тестов
+├── .github/                      # GitHub конфигурация
+├── .git/                         # Git репозиторий
+├── config_cli.py                 # CLI для управления конфигурацией
+├── start_server.py               # Скрипт запуска сервера
+├── run_server.bat                # Windows скрипт запуска
+├── Makefile                      # Команды для разработки
+├── pyproject.toml                # Конфигурация проекта
+├── requirements.txt              # Зависимости
+├── requirements-dev.txt          # Dev зависимости
+├── test_requirements.txt         # Тестовые зависимости
+├── env.example                   # Пример переменных окружения
+├── supabase_db.sql               # SQL схема базы данных
+├── test_request.json             # Тестовый запрос
+├── llm-gateway-backup.tar.gz     # Бэкап
+├── LICENSE                       # Лицензия
+├── .gitignore                    # Git ignore
+├── .flake8                       # Конфигурация flake8
+├── .pre-commit-config.yaml       # Pre-commit hooks
+└── README.md                     # Этот файл
 ```
 
-## 📚 Документация
+## 🛠️ Разработка
 
-### 🚀 Быстрый старт
-- 📖 [DEPLOYMENT.md](DEPLOYMENT.md) - Полное руководство по развертыванию
-- 🛠️ [DEVELOPMENT.md](DEVELOPMENT.md) - Руководство по разработке
+### Установка окружения
 
-### 📋 Конфигурация
-- ⚙️ [env.example](env.example) - Пример переменных окружения
+```bash
+# Клонирование и настройка
+git clone <your-repo-url>
+cd llm-gateway
 
-## 🔧 Скрипты развертывания
+# Установка зависимостей
+make install-dev
 
-### Основные скрипты:
-- `deployments/start.sh` - Запуск продакшн сервисов
-- `deployments/stop.sh` - Остановка сервисов
-- `deployments/backup.sh` - Создание бэкапов
-- `deployments/health-monitor.sh` - Мониторинг здоровья
+# Настройка окружения
+make setup
 
-### Настройка безопасности:
-- `deployments/firewall-setup.sh` - Настройка UFW файрвола
-- `deployments/ssl-setup.sh` - Настройка SSL сертификатов
-- `deployments/logrotate.conf` - Ротация логов
+# Запуск в режиме разработки
+make dev
+```
 
-### Системные сервисы:
-- `deployments/llm-gateway.service` - Systemd сервис для автозапуска
+### Полезные команды
 
-## 🐳 Docker конфигурация
+```bash
+# Показать справку
+make help
 
-### Образы:
-- `deployments/Dockerfile` - Основной образ приложения (Gunicorn)
-- `deployments/docker-compose.yml` - Локальная разработка
-- `deployments/docker-compose.prod.yml` - Продакшн (multi-worker)
-- `deployments/docker-compose.monitoring.yml` - Мониторинг
+# Проверка конфигурации
+make config
 
-### Nginx:
-- `deployments/nginx.conf` - Конфигурация reverse proxy (load balancing)
+# Валидация конфигурации
+make validate
 
-## ☸️ Kubernetes
+# Форматирование кода
+make format
 
-### Манифесты:
-- `deployments/k8s/deployment.yaml` - Deployment, Service, Ingress, HPA
-- `deployments/k8s/secrets.yaml` - Секреты и ConfigMaps
+# Линтинг
+make lint
 
-## 📊 Мониторинг и алерты
+# Тестирование
+make test
 
-### Prometheus:
-- `deployments/monitoring/prometheus.yml` - Конфигурация
-- `deployments/monitoring/prometheus-rules.yml` - Правила алертов
-- `deployments/monitoring/alertmanager.yml` - Конфигурация алертов
+# Все проверки
+make check
 
-### Grafana:
-- `deployments/monitoring/grafana-dashboard.json` - Дашборд
+# Очистка
+make clean
+```
 
-### Sentry:
-- Error tracking и performance monitoring
-- Настройте `SENTRY_DSN` в переменных окружения
+### CLI для конфигурации
+
+```bash
+# Показать конфигурацию
+python config_cli.py show
+
+# Показать краткую сводку
+python config_cli.py show --summary
+
+# Валидация конфигурации
+python config_cli.py validate
+```
 
 ## 🤝 Вклад в проект
 
-1. Fork репозитория
-2. Создайте feature branch
-3. Внесите изменения
-4. Добавьте тесты
-5. Создайте Pull Request
+Мы приветствуем вклад в развитие проекта! 
 
-## 📄 Лицензия
+1. **Fork** репозитория
+2. Создайте **feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Commit** изменения (`git commit -m 'Add amazing feature'`)
+4. **Push** в branch (`git push origin feature/amazing-feature`)
+5. Откройте **Pull Request**
 
-MIT License - см. файл LICENSE для деталей.
+### Требования к коду
+
+- Следуйте [стилю кода](docs/DEVELOPMENT_GUIDE.md#стиль-кода)
+- Добавляйте тесты для новых функций
+- Обновляйте документацию при необходимости
+- Проверяйте код с помощью `pre-commit` hooks
 
 ## 🆘 Поддержка
 
-При возникновении проблем:
-1. Проверьте логи: `docker-compose logs llm-gateway`
-2. Проверьте health endpoint: `curl http://localhost:8000/health`
-3. Запустите тесты: `python test_production_changes.py`
-4. Создайте issue в репозитории
+### Устранение неполадок
+
+1. **Проверьте логи**:
+   ```bash
+   docker-compose logs llm-gateway
+   # или
+   make docker-logs
+   ```
+
+2. **Проверьте health endpoint**:
+   ```bash
+   curl http://localhost:8000/health
+   # или
+   make health
+   ```
+
+3. **Проверьте конфигурацию**:
+   ```bash
+   make config
+   make validate
+   ```
+
+4. **Запустите тесты**:
+   ```bash
+   make test
+   ```
+
+5. **Создайте issue** в репозитории с подробным описанием проблемы
+
+### Полезные ссылки
+
+- 📖 [Полная документация](docs/README.md)
+- 🔌 [API Reference](docs/API_REFERENCE.md)
+- 🚀 [Руководство по развертыванию](docs/DEPLOYMENT_GUIDE.md)
+- 🛠️ [Руководство по разработке](docs/DEVELOPMENT_GUIDE.md)
+
+## 📄 Лицензия
+
+Этот проект распространяется под лицензией MIT. См. файл [LICENSE](LICENSE) для деталей.
 
 ## 🔗 Полезные ссылки
 
@@ -344,4 +560,14 @@ MIT License - см. файл LICENSE для деталей.
 - [Docker Documentation](https://docs.docker.com/)
 - [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [Sentry Documentation](https://docs.sentry.io/)
-- [Gunicorn Documentation](https://docs.gunicorn.org/)
+- [Langfuse Documentation](https://langfuse.com/docs)
+
+---
+
+<div align="center">
+
+**LLM Gateway** - Унифицированный API для всех LLM провайдеров
+
+[⭐ Star на GitHub](https://github.com/your-username/llm-gateway) • [📖 Документация](docs/README.md) • [🚀 Быстрый старт](docs/QUICKSTART.md)
+
+</div>

@@ -82,4 +82,15 @@ dev: ## Start development server
 
 check: lint test ## Run all checks (lint + test)
 
-pre-commit: format lint test ## Run pre-commit checks 
+pre-commit: format lint test ## Run pre-commit checks
+
+check-docs: ## Check documentation consistency
+	python scripts/check_documentation.py
+
+clean: ## Clean up cache and temporary files
+	python scripts/clean_project.py --dry-run
+
+clean-force: ## Force clean up cache and temporary files
+	python scripts/clean_project.py
+
+docs-check: check-docs ## Alias for check-docs 

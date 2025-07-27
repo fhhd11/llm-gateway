@@ -15,7 +15,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - RATE_LIMIT_STORAGE=redis
     env_file:
-      - ../env.example
+      - ../.env
     depends_on:
       - redis
     restart: unless-stopped

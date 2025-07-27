@@ -1,0 +1,11 @@
+{
+  "model": "gemini-1.5-pro",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Какая погода в Гонконге?"
+    }
+  ],
+  "max_tokens": 500,
+  "temperature": 0.7
+} 

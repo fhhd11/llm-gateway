@@ -32,4 +32,14 @@ repos:
     hooks:
       - id: bandit
         args: ["-r", "app/"]
-        exclude: ^tests/ 
+        exclude: ^tests/
+
+  # Custom documentation check
+  - repo: local
+    hooks:
+      - id: check-documentation
+        name: Check Documentation
+        entry: python scripts/check_documentation.py
+        language: python
+        files: ^(app/|docs/|README\.md|env\.example)
+        pass_filenames: false 

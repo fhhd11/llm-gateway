@@ -19,7 +19,7 @@ def get_storage_uri():
         # Check if Redis is available
         if redis_client.is_connected():
             logger.info("Using Redis for rate limiting")
-            return f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+            return f"redis://{settings.redis.host}:{settings.redis.port}/{settings.redis.db}"
         else:
             logger.warning("Redis not available, falling back to memory storage")
             return "memory://"

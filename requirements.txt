@@ -18,3 +18,4 @@ asyncpg>=0.29.0
 tenacity>=8.2.3
 pybreaker>=1.0.1
 sentry-sdk[fastapi]>=1.38.0
+sqlalchemy>=2.0.0

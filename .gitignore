@@ -398,4 +398,8 @@ docker-volumes/
 
 # Local development
 local/
-dev/ 
+dev/
+
+# Scripts output
+scripts/*.log
+scripts/temp/ 
